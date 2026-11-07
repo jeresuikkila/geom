@@ -519,13 +519,20 @@ impl PolyLine {
         Ok(result)
     }
 
-    /// This produces a `Polygon` with a valid `Ring`. It may crash if this polyline was made with
-    /// `unchecked_new`
+    /// This produces a `Polygon` with a valid `Ring`. It crashes when the thickened outline isn't a
+    /// valid ring, which happens when a sharp bend makes it fold back over itself, or if this
+    /// polyline was made with `unchecked_new`. Use `try_make_polygons` to handle that case.
     pub fn make_polygons(&self, width: Distance) -> Polygon {
+        self.try_make_polygons(width)
+            .expect("PolyLine::make_polygons() failed")
+    }
+
+    /// Like `make_polygons`, but returns an error instead of crashing when the thickened outline
+    /// isn't a valid ring.
+    pub fn try_make_polygons(&self, width: Distance) -> Result<Polygon> {
         let tessellation = self.thicken_tessellation(width);
-        let ring = Ring::deduping_new(tessellation.points.clone())
-            .expect("PolyLine::make_polygons() failed");
-        Polygon::pretessellated(vec![ring], tessellation)
+        let ring = Ring::deduping_new(tessellation.points.clone())?;
+        Ok(Polygon::pretessellated(vec![ring], tessellation))
     }
 
     /// This produces a `Polygon` with a possibly invalid `Ring`. It shouldn't crash. Use sparingly.
@@ -1221,5 +1228,22 @@ impl From<&PolyLine> for geo::LineString {
             .map(|pt| geo::coord! { x: pt.x(), y: pt.y() })
             .collect();
         geo::LineString::new(coords)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_make_polygons() {
+        let pl = PolyLine::must_new(vec![
+            Pt2D::new(0.0, 0.0),
+            Pt2D::new(10.0, 0.0),
+            Pt2D::new(10.0, 10.0),
+        ]);
+        assert!(pl.try_make_polygons(Distance::meters(2.0)).is_ok());
+        // Both sides of a zero-width line are the same points, which don't form a ring
+        assert!(pl.try_make_polygons(Distance::ZERO).is_err());
     }
 }
